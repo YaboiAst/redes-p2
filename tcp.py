@@ -1,6 +1,8 @@
 import asyncio
+import random
+import sys
 from tcputils import *
-##
+
 class Servidor:
     def __init__(self, rede, porta):
         self.rede = rede
@@ -34,6 +36,10 @@ class Servidor:
             # A flag SYN estar setada significa que é um cliente tentando estabelecer uma conexão nova
             # TODO: talvez você precise passar mais coisas para o construtor de conexão
             conexao = self.conexoes[id_conexao] = Conexao(self, id_conexao)
+            response = fix_checksum(make_header(dst_port, src_port, random.randint(0, 0xffff), seq_no+1, FLAGS_ACK | FLAGS_SYN), dst_addr, src_addr)
+            self.rede.enviar(response, src_addr)
+            conexao.expected_seq = seq_no + 1
+            #print("retornando", response)
             # TODO: você precisa fazer o handshake aceitando a conexão. Escolha se você acha melhor
             # fazer aqui mesmo ou dentro da classe Conexao.
             if self.callback:
@@ -53,6 +59,7 @@ class Conexao:
         self.callback = None
         self.timer = asyncio.get_event_loop().call_later(1, self._exemplo_timer)  # um timer pode ser criado assim; esta linha é só um exemplo e pode ser removida
         #self.timer.cancel()   # é possível cancelar o timer chamando esse método; esta linha é só um exemplo e pode ser removida
+        self.expected_seq = 0
 
     def _exemplo_timer(self):
         # Esta função é só um exemplo e pode ser removida
@@ -62,7 +69,22 @@ class Conexao:
         # TODO: trate aqui o recebimento de segmentos provenientes da camada de rede.
         # Chame self.callback(self, dados) para passar dados para a camada de aplicação após
         # garantir que eles não sejam duplicados e que tenham sido recebidos em ordem.
+        #  
+        print(seq_no, self.expected_seq)
+        if seq_no != self.expected_seq:
+            #print(seq_no, ": expected ", self.expected_seq)
+            return
+
         print('recebido payload: %r' % payload)
+
+        # ACK
+        src_addr, src_port, dst_addr, dst_port = self.id_conexao 
+        response = fix_checksum(make_header(dst_port, src_port, ack_no + len(payload), seq_no, FLAGS_ACK), dst_addr, src_addr)
+        self.servidor.rede.enviar(response, dst_addr)
+
+        # Passa para a camada de aplicação
+        self.expected_seq = seq_no + len(payload)
+        self.callback(self, payload)
 
     # Os métodos abaixo fazem parte da API
 
