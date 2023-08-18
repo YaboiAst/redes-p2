@@ -48,8 +48,9 @@ class Servidor:
             # A flag SYN estar setada significa que é um cliente tentando estabelecer uma conexão nova
             # TODO: talvez você precise passar mais coisas para o construtor de conexão
             conexao = self.conexoes[id_conexao] = Conexao(self, id_conexao, seq_no)
+            ack_no = seq_no + 1
             response = fix_checksum(
-                make_header(dst_port, src_port, seq_no, seq_no+1, FLAGS_ACK | FLAGS_SYN),
+                make_header(dst_port, src_port, seq_no, ack_no, FLAGS_ACK | FLAGS_SYN),
                 dst_addr, 
                 src_addr)
             self.rede.enviar(response, src_addr)
@@ -123,6 +124,12 @@ class Conexao:
         # TODO: implemente aqui o envio de dados.
         # Chame self.servidor.rede.enviar(segmento, dest_addr) para enviar o segmento
         # que você construir para a camada de rede.
+        src_addr, src_port, dst_addr, dst_port = self.id_conexao
+        segment = [dados[i: i + MSS] for i in range(0, len(dados), MSS)]
+        for seg in segment:
+            segment_to_send = fix_checksum(make_header(dst_port, src_port, self.seq_no + 1, self.ack_no, FLAGS_ACK) + seg, dst_addr, src_addr)
+            self.seq_no += len(seg)
+            self.servidor.rede.enviar(segment_to_send, dst_addr)
         pass
 
     def fechar(self):
