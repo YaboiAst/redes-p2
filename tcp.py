@@ -87,7 +87,7 @@ class Conexao:
         # TODO: trate aqui o recebimento de segmentos provenientes da camada de rede.
         # Chame self.callback(self, dados) para passar dados para a camada de aplicação após
         # garantir que eles não sejam duplicados e que tenham sido recebidos em ordem.
-        #  
+
         # print(seq_no, self.expected_seq)
         # if seq_no != self.expected_seq:
         #     #print(seq_no, ": expected ", self.expected_seq)
@@ -103,8 +103,14 @@ class Conexao:
         if(self.ack_no == seq_no and len(payload) > 0):
             self.callback(self, payload)
             self.ack_no += len(payload)
-            header = fix_checksum(make_header(dst_port, src_port, self.seq_no, self.ack_no, FLAGS_ACK), dst_addr, src_addr)
-            self.servidor.rede.enviar(header, src_addr)
+            segment = fix_checksum(make_header(dst_port, src_port, self.seq_no, self.ack_no, FLAGS_ACK), dst_addr, src_addr)
+            self.servidor.rede.enviar(segment, src_addr)
+
+        if (flags & FLAGS_FIN) == FLAGS_FIN:
+            self.callback(self, b'')
+            segment = fix_checksum(make_header(dst_port, src_port, self.seq_no, self.ack_no + 1, FLAGS_ACK), dst_addr, src_addr)
+            self.servidor.rede.enviar(segment, src_addr)
+            
 
         # self.expected_seq = seq_no + len(payload) 
 
@@ -137,4 +143,9 @@ class Conexao:
         Usado pela camada de aplicação para fechar a conexão
         """
         # TODO: implemente aqui o fechamento de conexão
+
+        src_addr, src_port, dst_addr, dst_port = self.id_conexao
+        segment= fix_checksum(make_header(dst_port, src_port, self.seq_no + 1, self.ack_no, FLAGS_FIN) + b'', dst_addr, src_addr)
+        self.servidor.rede.enviar(segment, dst_addr)
+        
         pass
