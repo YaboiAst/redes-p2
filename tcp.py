@@ -68,20 +68,29 @@ class Servidor:
                   (src_addr, src_port, dst_addr, dst_port))
 
 
+#self.timer = asyncio.get_event_loop().call_later(1, self._exemplo_timer)  # um timer pode ser criado assim; esta linha é só um exemplo e pode ser removida
+#self.timer.cancel()   # é possível cancelar o timer chamando esse método; esta linha é só um exemplo e pode ser removida
+
 class Conexao:
     def __init__(self, servidor, id_conexao, seq_no):
         self.servidor = servidor
         self.id_conexao = id_conexao
         self.callback = None
-        self.timer = asyncio.get_event_loop().call_later(1, self._exemplo_timer)  # um timer pode ser criado assim; esta linha é só um exemplo e pode ser removida
-        #self.timer.cancel()   # é possível cancelar o timer chamando esse método; esta linha é só um exemplo e pode ser removida
         self.expected_seq = 0
         self.seq_no = seq_no
         self.ack_no = seq_no + 1
+        self.current_segment = None
 
-    def _exemplo_timer(self):
-        # Esta função é só um exemplo e pode ser removida
-        print('Este é um exemplo de como fazer um timer')
+        self.timer = None
+        self.pacote_recebido = False
+
+    def reenviar_pacote(self):
+        if(self.pacote_recebido == False):
+            print("Trying...")
+            _, _, dst_addr, _ = self.id_conexao
+
+            self.servidor.rede.enviar(self.current_segment, dst_addr)
+            #timer = asyncio.get_event_loop().call_later(1, self.reenviar_pacote)
 
     def _rdt_rcv(self, seq_no, ack_no, flags, payload):
         # TODO: trate aqui o recebimento de segmentos provenientes da camada de rede.
@@ -95,16 +104,23 @@ class Conexao:
 
         print('recebido payload: %r' % payload)
 
-        # ACK
-        # src_addr, src_port, dst_addr, dst_port = self.id_conexao 
-        # response = fix_checksum(make_header(dst_port, src_port, self.ack_no, self.seq_no, FLAGS_ACK), dst_addr, src_addr)
-        # self.servidor.rede.enviar(response, dst_addr)
+        if (flags & FLAGS_ACK) == FLAGS_ACK:
+            print("recebeu uma resposta ACK")
+            #self.seq_no = ack_no
+            self.pacote_recebido = True
+            if(self.timer is not None):
+                self.timer.cancel()
+
+        # Limpar o buffer de acks
+       
         src_addr, src_port, dst_addr, dst_port = self.id_conexao
+
         if(self.ack_no == seq_no and len(payload) > 0):
             self.callback(self, payload)
             self.ack_no += len(payload)
             segment = fix_checksum(make_header(dst_port, src_port, self.seq_no, self.ack_no, FLAGS_ACK), dst_addr, src_addr)
             self.servidor.rede.enviar(segment, src_addr)
+
 
         if (flags & FLAGS_FIN) == FLAGS_FIN:
             self.callback(self, b'')
@@ -133,9 +149,12 @@ class Conexao:
         src_addr, src_port, dst_addr, dst_port = self.id_conexao
         segment = [dados[i: i + MSS] for i in range(0, len(dados), MSS)]
         for seg in segment:
-            segment_to_send = fix_checksum(make_header(dst_port, src_port, self.seq_no + 1, self.ack_no, FLAGS_ACK) + seg, dst_addr, src_addr)
+            self.pacote_recebido = False
+            self.current_segment = fix_checksum(make_header(dst_port, src_port, self.seq_no + 1, self.ack_no, FLAGS_ACK) + seg, dst_addr, src_addr)
+            self.servidor.rede.enviar(self.current_segment, dst_addr)
             self.seq_no += len(seg)
-            self.servidor.rede.enviar(segment_to_send, dst_addr)
+            self.timer = asyncio.get_event_loop().call_later(1, self.reenviar_pacote)
+
         pass
 
     def fechar(self):
