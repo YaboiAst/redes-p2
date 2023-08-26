@@ -1,7 +1,7 @@
 import asyncio
 import random
 import sys
-from tcputils import *
+from grader.tcputils import *
 
 class Servidor:
     def __init__(self, rede, porta):
@@ -123,6 +123,9 @@ class Conexao:
         # TODO: implemente aqui o envio de dados.
         # Chame self.servidor.rede.enviar(segmento, dest_addr) para enviar o segmento
         # que você construir para a camada de rede.
+        src_addr, src_port, dst_addr, dst_port = self.id_conexao
+        header = fix_checksum(make_header(dst_port, src_port, self.seq_no + len(dados), self.ack_no, FLAGS_ACK), dst_addr, src_addr)
+        self.servidor.rede.enviar(header + dados, dst_addr)
         pass
 
     def fechar(self):
