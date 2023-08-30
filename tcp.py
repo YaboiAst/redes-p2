@@ -85,7 +85,6 @@ class Conexao:
         self.is_timer_up = False
 
     def reenviar_pacote(self):
-        print("Trying...")
         self.timer.cancel()
         self.is_timer_up = False
             
@@ -114,7 +113,7 @@ class Conexao:
 
         if (flags & FLAGS_FIN) == FLAGS_FIN:
             self.ack_no += 1
-            segment = fix_checksum(make_header(dst_port, src_port, self.seq_no, self.ack_no + 1, FLAGS_ACK), dst_addr, src_addr)
+            segment = fix_checksum(make_header(dst_port, src_port, self.seq_no, self.ack_no, FLAGS_ACK), dst_addr, src_addr)
             self.servidor.rede.enviar(segment, src_addr)
             self.callback(self, b'')
             del self.servidor.conexoes[self.id_conexao]
@@ -160,12 +159,12 @@ class Conexao:
         src_addr, src_port, dst_addr, dst_port = self.id_conexao
         segment = [dados[i: i + MSS] for i in range(0, len(dados), MSS)]
         for seg in segment:
-            self.current_segment = fix_checksum(make_header(dst_port, src_port, self.seq_no + 1, self.ack_no, FLAGS_ACK) + seg, dst_addr, src_addr)
+            self.current_segment = fix_checksum(make_header(dst_port, src_port, self.expected_seq, self.ack_no, FLAGS_ACK) + seg, dst_addr, src_addr)
             self.servidor.rede.enviar(self.current_segment, dst_addr)
             self.expected_seq += len(seg)
 
             self.not_yet_acked += seg
-            self.timer = asyncio.get_event_loop().call_later(1, self.reenviar_pacote)
+            self.timer = asyncio.get_event_loop().call_later(0.5, self.reenviar_pacote)
 
         pass
 
@@ -176,7 +175,7 @@ class Conexao:
         # TODO: implemente aqui o fechamento de conexão
 
         src_addr, src_port, dst_addr, dst_port = self.id_conexao
-        segment= fix_checksum(make_header(dst_port, src_port, self.seq_no + 1, self.ack_no, FLAGS_FIN) + b'', dst_addr, src_addr)
+        segment= fix_checksum(make_header(dst_port, src_port, self.expected_seq, self.ack_no, FLAGS_FIN) + b'', dst_addr, src_addr)
         self.servidor.rede.enviar(segment, dst_addr)
         
         pass
