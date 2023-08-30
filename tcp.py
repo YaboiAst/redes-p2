@@ -54,7 +54,6 @@ class Servidor:
                 dst_addr, 
                 src_addr)
             self.rede.enviar(response, src_addr)
-            conexao.expected_seq = seq_no + 1
             #print("retornando", response)
             # TODO: você precisa fazer o handshake aceitando a conexão. Escolha se você acha melhor
             # fazer aqui mesmo ou dentro da classe Conexao.
@@ -76,20 +75,28 @@ class Conexao:
         self.servidor = servidor
         self.id_conexao = id_conexao
         self.callback = None
-        self.expected_seq = 0
         self.seq_no = seq_no
+        self.expected_seq = seq_no + 1
         self.ack_no = seq_no + 1
         self.current_segment = None
+        self.not_yet_acked = b''
 
         self.timer = None
-        self.pacote_recebido = False
+        self.is_timer_up = False
 
     def reenviar_pacote(self):
-        if(self.pacote_recebido == False):
-            print("Trying...")
-            _, _, dst_addr, _ = self.id_conexao
+        print("Trying...")
+        self.timer.cancel()
+        self.is_timer_up = False
+            
+        src_addr, src_port, dst_addr, dst_port = self.id_conexao
+        header = fix_checksum(make_header(dst_port, src_port, self.seq_no, self.ack_no, FLAGS_ACK), dst_addr, src_addr)
 
-            self.servidor.rede.enviar(self.current_segment, dst_addr)
+        segment = self.not_yet_acked[:MSS]
+        self.servidor.rede.enviar(header + segment, src_addr)
+
+        self.timer = asyncio.get_event_loop().call_later(0.5, self.reenviar_pacote)
+        self.is_timer_up = True 
             #timer = asyncio.get_event_loop().call_later(1, self.reenviar_pacote)
 
     def _rdt_rcv(self, seq_no, ack_no, flags, payload):
@@ -97,38 +104,42 @@ class Conexao:
         # Chame self.callback(self, dados) para passar dados para a camada de aplicação após
         # garantir que eles não sejam duplicados e que tenham sido recebidos em ordem.
 
-        # print(seq_no, self.expected_seq)
-        # if seq_no != self.expected_seq:
-        #     #print(seq_no, ": expected ", self.expected_seq)
-        #     return
+        src_addr, src_port, dst_addr, dst_port = self.id_conexao
+
+        if(self.ack_no != seq_no):
+            return
 
         print('recebido payload: %r' % payload)
 
-        if (flags & FLAGS_ACK) == FLAGS_ACK:
-            print("recebeu uma resposta ACK")
-            #self.seq_no = ack_no
-            self.pacote_recebido = True
-            if(self.timer is not None):
-                self.timer.cancel()
-
-        # Limpar o buffer de acks
-       
-        src_addr, src_port, dst_addr, dst_port = self.id_conexao
-
-        if(self.ack_no == seq_no and len(payload) > 0):
-            self.callback(self, payload)
-            self.ack_no += len(payload)
-            segment = fix_checksum(make_header(dst_port, src_port, self.seq_no, self.ack_no, FLAGS_ACK), dst_addr, src_addr)
-            self.servidor.rede.enviar(segment, src_addr)
-
 
         if (flags & FLAGS_FIN) == FLAGS_FIN:
-            self.callback(self, b'')
+            self.ack_no += 1
             segment = fix_checksum(make_header(dst_port, src_port, self.seq_no, self.ack_no + 1, FLAGS_ACK), dst_addr, src_addr)
             self.servidor.rede.enviar(segment, src_addr)
-            
+            self.callback(self, b'')
+            del self.servidor.conexoes[self.id_conexao]
 
-        # self.expected_seq = seq_no + len(payload) 
+        self.ack_no += len(payload)
+
+        if(len(payload) > 0):
+            segment = fix_checksum(make_header(dst_port, src_port, self.seq_no, self.ack_no, FLAGS_ACK), dst_addr, src_addr)
+            self.callback(self, payload)
+            self.servidor.rede.enviar(segment, src_addr)
+            return
+
+        if (flags & FLAGS_ACK) == FLAGS_ACK:
+            print("recebeu uma resposta ACK")
+            if(self.is_timer_up == True):
+                self.timer.cancel()
+                self.timer = None
+                self.is_timer_up = False
+
+            self.not_yet_acked = self.not_yet_acked[ack_no - self.seq_no:]
+            self.seq_no = ack_no
+
+            if ack_no < self.expected_seq:
+                self.is_timer_up = True
+                self.timer = asyncio.get_event_loop().call_later(0.5, self.reenviar_pacote)
 
     # Os métodos abaixo fazem parte da API
 
@@ -149,10 +160,11 @@ class Conexao:
         src_addr, src_port, dst_addr, dst_port = self.id_conexao
         segment = [dados[i: i + MSS] for i in range(0, len(dados), MSS)]
         for seg in segment:
-            self.pacote_recebido = False
             self.current_segment = fix_checksum(make_header(dst_port, src_port, self.seq_no + 1, self.ack_no, FLAGS_ACK) + seg, dst_addr, src_addr)
             self.servidor.rede.enviar(self.current_segment, dst_addr)
-            self.seq_no += len(seg)
+            self.expected_seq += len(seg)
+
+            self.not_yet_acked += seg
             self.timer = asyncio.get_event_loop().call_later(1, self.reenviar_pacote)
 
         pass
